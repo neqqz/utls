@@ -2905,6 +2905,17 @@ func (uconn *UConn) ApplyPreset(p *ClientHelloSpec) error {
 					}
 					uconn.HandshakeState.State13.KeyShareKeys.Mlkem = mlkemKey
 					uconn.HandshakeState.State13.KeyShareKeys.MlkemEcdhe = ecdheKey
+					// Pure-PQ ClientHello has no separate X25519 key_share entry, so
+					// Ecdhe would stay nil. establishHandshakeKeys always calls
+					// getSharedKey(..., ecdhe) BEFORE the uTLS mlkemEcdhe override;
+					// nil ecdhe → "invalid server key share" / bad record MAC.
+					// Mirror the hybrid/stdlib shape: keep the X25519 half in Ecdhe too.
+					if uconn.HandshakeState.State13.KeyShareKeys.Ecdhe == nil {
+						uconn.HandshakeState.State13.KeyShareKeys.Ecdhe = ecdheKey
+					}
+					if uconn.HandshakeState.State13.KeyShareKeys.CurveID == 0 {
+						uconn.HandshakeState.State13.KeyShareKeys.CurveID = curveID
+					}
 				} else {
 					ecdheKey, err := generateECDHEKey(uconn.config.rand(), curveID)
 					if err != nil {

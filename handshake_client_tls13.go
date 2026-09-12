@@ -608,7 +608,24 @@ func (hs *clientHandshakeStateTLS13) establishHandshakeKeys() error {
 		}
 		ecdhePeerData = hs.serverHello.serverShare.data[:x25519PublicKeySize]
 	}
-	sharedKey, err := getSharedKey(ecdhePeerData, hs.keyShareKeys.ecdhe)
+	// For pure-PQ ClientHello (only X25519MLKEM768 key_share) ecdhe may be nil
+	// while mlkemEcdhe holds the X25519 half. Prefer mlkemEcdhe for PQ groups
+	// under uTLS; fall back to ecdhe for stdlib / hybrid shapes.
+	var sharedKey []byte
+	var err error
+	if hs.serverHello.serverShare.group == X25519MLKEM768 || hs.serverHello.serverShare.group == X25519Kyber768Draft00 {
+		ecdhePriv := hs.keyShareKeys.ecdhe
+		if hs.uconn != nil && hs.uconn.clientHelloBuildStatus == BuildByUtls && hs.keyShareKeys.mlkemEcdhe != nil {
+			ecdhePriv = hs.keyShareKeys.mlkemEcdhe
+		}
+		if ecdhePriv == nil {
+			c.sendAlert(alertInternalError)
+			return errors.New("tls: missing ECDHE key for hybrid PQ share")
+		}
+		sharedKey, err = getSharedKey(ecdhePeerData, ecdhePriv)
+	} else {
+		sharedKey, err = getSharedKey(ecdhePeerData, hs.keyShareKeys.ecdhe)
+	}
 	// [uTLS] SECTION END
 	if err != nil {
 		c.sendAlert(alertIllegalParameter)
@@ -618,14 +635,6 @@ func (hs *clientHandshakeStateTLS13) establishHandshakeKeys() error {
 		if hs.keyShareKeys.mlkem == nil {
 			return c.sendAlert(alertInternalError)
 		}
-		// [uTLS] SECTION BEGIN
-		if hs.uconn != nil && hs.uconn.clientHelloBuildStatus == BuildByUtls {
-			if sharedKey, err = getSharedKey(ecdhePeerData, hs.keyShareKeys.mlkemEcdhe); err != nil {
-				c.sendAlert(alertIllegalParameter)
-				return errors.New("tls: invalid server key share")
-			}
-		}
-		// [uTLS] SECTION END
 		ciphertext := hs.serverHello.serverShare.data[:mlkem.CiphertextSize768]
 		mlkemShared, err := hs.keyShareKeys.mlkem.Decapsulate(ciphertext)
 		if err != nil {
