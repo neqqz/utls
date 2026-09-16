@@ -62,6 +62,21 @@ func (q *UQUICConn) ApplyPreset(p *ClientHelloSpec) error {
 	return q.conn.ApplyPreset(p)
 }
 
+// HandshakeState exposes the underlying UConn's HandshakeState (in
+// particular Hello.Random and Hello.KeyShares) for callers that need to
+// inspect or patch ClientHello fields between ApplyPreset and Start — e.g.
+// to bind an anti-replay value to this specific handshake's own key_share
+// rather than sending a value that's identical, and therefore replayable,
+// across every handshake in some outside rotation window.
+//
+// Only safe to call, and only meaningful to mutate, between ApplyPreset and
+// Start: ApplyPreset is what populates Hello, and Start hands the connection
+// to a separate handshake goroutine that reads these same fields to marshal
+// and send the ClientHello — mutating after Start is a data race.
+func (q *UQUICConn) HandshakeState() *PubClientHandshakeState {
+	return &q.conn.HandshakeState
+}
+
 // NextEvent returns the next event occurring on the connection.
 // It returns an event with a Kind of QUICNoEvent when no events are available.
 func (q *UQUICConn) NextEvent() QUICEvent {
